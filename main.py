@@ -1,12 +1,14 @@
-import math
+import threading
 import numpy as np
 from scipy import integrate
+import matplotlib.pyplot as plt
 
 q = -1.602 * 10 ** (-19)  # 电子电量
 h = 6.62607015 * 10 ** (-34)  # 普朗克常数
 m0 = 9.11 * 10 ** (-31)  # 电子质量
 m_eff = m0  # 先用电子质量代替
-sigma0 = 1
+sigma0 = 1  # 体电导率
+
 """矩形导线的SRFS模型"""
 
 
@@ -18,7 +20,6 @@ class SRFS:
         pass
 
     def specular_reflection_scattering(self, xn, yn):
-
         def func0(theta):
             return 2 * np.pi * np.cos(theta) ** 2 * np.sin(theta)
 
@@ -43,10 +44,10 @@ class SRFS:
                 np.clip(self.kapa_b * (-yn - 1) / (2 * denominator_b), -700, 700)
             )
             exp_kapa_a_xn = np.exp(
-                np.clip(self.kapa_a * (xn - 1) / (2 * denominator_b), -700, 700)
+                np.clip(self.kapa_a * (xn - 1) / (2 * denominator_a), -700, 700)
             )
             exp_kapa_a_neg_xn = np.exp(
-                np.clip(self.kapa_a * (-xn - 1) / (2 * denominator_b), -700, 700)
+                np.clip(self.kapa_a * (-xn - 1) / (2 * denominator_a), -700, 700)
             )
 
             # 计算分母部分
@@ -54,7 +55,7 @@ class SRFS:
                 np.clip(-self.kapa_a / denominator_a, -700, 700)
             )
             denominator_term_b = 1 - self.p * np.exp(
-                np.clip(-self.kapa_b / denominator_a, -700, 700)
+                np.clip(-self.kapa_b / denominator_b, -700, 700)
             )
 
             # 计算结果
@@ -62,17 +63,16 @@ class SRFS:
                 np.cos(theta) ** 2
                 * sin_theta
                 * (
-                    (exp_kapa_b_yn + exp_kapa_b_neg_yn) / denominator_term_a
-                    + (exp_kapa_a_xn + exp_kapa_a_neg_xn) / denominator_term_b
+                    (exp_kapa_b_yn + exp_kapa_b_neg_yn) / denominator_term_b
+                    + (exp_kapa_a_xn + exp_kapa_a_neg_xn) / denominator_term_a
                 )
             )
-
             return result
 
         int2, _ = integrate.dblquad(
             func1xy,
             0,
-            np.pi,
+            np.pi / 2,
             lambda x: 0,
             lambda x: np.pi,
         )
@@ -90,25 +90,9 @@ class SRFS:
 
                     # 计算指数部分的参数
                     exp1 = -self.kapa_a * d / (2 * np.sin(theta) * np.cos(fai))
-                    exp2 = -self.kapa_a / (2 * np.sin(theta) * np.cos(fai))
+                    exp2 = -self.kapa_a / (np.sin(theta) * np.cos(fai))
                     exp3 = -self.kapa_b * n / (2 * np.sin(theta) * np.sin(fai))
                     exp4 = -self.kapa_b / (np.sin(theta) * np.sin(fai))
-
-                    # if exp1 > 0 or exp2 > 0 or exp3 > 0 or exp4 > 0:
-                    #     print("exp1 = ", exp1)
-                    #     print("exp2 = ", exp2)
-                    #     print("exp3 = ", exp3)
-                    #     print("exp4 = ", exp4)
-
-                    # 避免指数过大
-                    if exp1 < -100:
-                        exp1 = -100
-                    if exp2 < -100:
-                        exp2 = -100
-                    if exp3 < -100:
-                        exp3 = -100
-                    if exp4 < -100:
-                        exp4 = -100
 
                     # 计算指数函数
                     exp_val1 = np.exp(exp1)
@@ -145,69 +129,13 @@ class SRFS:
                 )
                 int3 += result
 
-        sigma = 3 / 4 * sigma0 * (int1 - int2 - int3)
+        # print("int1 = ", int1)
+        # print("int2 = ", int2)
+        # print("int3 = ", int3)
+        sigma = 3 / 4 * sigma0 * (int1 - int2 - int3) / np.pi
         return sigma
 
     def pure_diffusion_surface_scatter(self, xn, yn):
-        """
-        def func0(theta):
-            return 2 * np.pi * np.cos(theta) ** 2 * np.sin(theta)
-
-        int1, _ = integrate.quad(func0, 0, np.pi)
-
-        def func1xy(theta, fai):
-            return (
-                np.cos(theta) ** 2
-                * np.sin(theta)
-                * (
-                    (
-                        np.exp(
-                            self.kapa_b * (yn - 1) / (2 * np.sin(theta) * np.sin(fai))
-                        )
-                        + np.exp(
-                            self.kapa_b * (-yn - 1) / (2 * np.sin(theta) * np.sin(fai))
-                        )
-                    )
-                    + (
-                        np.exp(
-                            self.kapa_a * (xn - 1) / (2 * np.sin(theta) * np.sin(fai))
-                        )
-                        + np.exp(
-                            self.kapa_a * (-xn - 1) / (2 * np.sin(theta) * np.sin(fai))
-                        )
-                    )
-                )
-            )
-
-        int2, _ = integrate.dblquad(func1xy, 0, np.pi, lambda x: 0, lambda x: np.pi / 2)
-
-        int3 = 0
-        # 遍历 n 和 d 的值
-        for n in [1 + yn, 1 - yn]:
-            for d in [1 + xn, 1 - xn]:
-
-                # 定义被积函数 func2xy
-                def func2xy(theta, fai):
-                    return (
-                        np.cos(theta) ** 2
-                        * np.sin(theta)
-                        * abs(
-                            np.exp(-self.kapa_a * d / (2 * np.sin(theta) * np.sin(fai)))
-                            - np.exp(
-                                -self.kapa_b * n / (2 * np.sin(theta) * np.sin(fai))
-                            )
-                        )
-                        / 2
-                    )
-
-                # 计算二重积分并累加到 int3
-                result, _ = integrate.dblquad(
-                    func2xy, 0, np.pi, lambda x: 0, lambda x: np.pi / 2
-                )
-                int3 += result
-
-        sigma = 3 / 4 * sigma0 * (int1 - int2 - int3)
-        """
         self.p = 0
         sigma = self.specular_reflection_scattering(xn, yn)
         return sigma
@@ -218,7 +146,7 @@ class SRFS:
 
         int1, _ = integrate.quad(func0, 0, np.pi)
 
-        def func1xy(theta, fai):
+        def func1xy(fai, theta):
             return (
                 2
                 * (1 - self.p)
@@ -249,7 +177,7 @@ class SRFS:
 
         int2, _ = integrate.dblquad(func1xy, 0, np.pi, lambda x: 0, lambda x: np.pi / 2)
 
-        sigma = 3 / 4 * sigma0 * (int1 - int2)
+        sigma = 3 / 4 * sigma0 * (int1 - int2) / np.pi
         return sigma
 
     def reset_params(self, ka, kb, p):
@@ -258,16 +186,39 @@ class SRFS:
         self.p = p
 
 
+def compute_conductivity_of_square_conductor(ka, kb, p):
+    conducitivity = 0
+    count = 0
+    srfs_model = SRFS(p, ka, kb)
+    srfs_model.reset_params(ka, kb, p)
+    for xn in np.linspace(-1, 1, 10):
+        for yn in np.linspace(-1, 1, 10):
+            count = count + 1
+            conducitivity = conducitivity + srfs_model.pure_diffusion_surface_scatter(
+                xn, yn
+            )
+    conducitivity = conducitivity / count
+    return conducitivity
+
+
 inputp = 0
-ka = 20
+ka = 0.5
 kb = ka
 model = SRFS(inputp, ka, kb)
-count = 0
-conducitivity = 0
-l = [0]  # np.linspace(-1, 1, 10)
-for xn in l:
-    for yn in l:
-        count = count + 1
-        conducitivity = conducitivity + model.pure_diffusion_surface_scatter(xn, yn)
-conducitivity = conducitivity / count
-print("原点电导率", conducitivity)
+conducitivity_1 = []
+# for kappa in np.linspace(0, 20, 41):
+#     print(kappa)
+#     conducitivity_1.append(conductivity_of_square_conductor(model, kappa, kappa, 0))
+
+# with open("output.txt", "w", encoding="utf-8") as file:
+#     # 遍历列表并将每个元素写入文件，每个元素占一行
+#     for item in conducitivity_1:
+#         file.write(str(item) + "\n")  # 添加换行符
+
+# plt.plot(np.linspace(0, 20, 41), conducitivity_1)
+# plt.xlabel(r"$\kappa_a = \kappa_b$")
+# plt.ylabel(r"$Conducitivity$")
+# plt.legend()
+# conducitivity = model.pure_diffusion_surface_scatter(0, 0)
+
+# print("原点电导率", conducitivity)

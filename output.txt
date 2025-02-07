@@ -1,0 +1,2 @@
+Conductivity versus κ for different specularity p for square wire in the proposed SRFS model
+0.2806775501721408
